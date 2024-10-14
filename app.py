@@ -7,7 +7,7 @@ import logging
 from flask_cors import CORS
 
 # Configure Google Generative AI
-GENAI_API_KEY = "AIzaSyDceI3mqdAoSIPkGpYgbttbuJ-YUwoLk3E"
+GENAI_API_KEY = "API KEY HERE GEMINI"
 genai.configure(api_key=GENAI_API_KEY)
 
 # Configure Flask app
