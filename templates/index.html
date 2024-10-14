@@ -29,12 +29,14 @@
         <div id="loading" class="loading">
             <p>Processing your request... ⏳</p>
         </div>
-        {% if response %}
-            <div class="response">
-                <h2>Response:</h2>
-                <p>{{ response }}</p>
-            </div>
-        {% endif %}
+        <div class="response-container">
+            {% if response %}
+                <div class="response">
+                    <h2>Response:</h2>
+                    <p>{{ response }}</p>
+                </div>
+            {% endif %}
+        </div>
     </div>
 </body>
 </html>
