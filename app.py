@@ -1,19 +1,26 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, session
 import os
 import google.generativeai as genai
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import logging
 from flask_cors import CORS
+import PyPDF2
+from werkzeug.utils import secure_filename
+import uuid
+import json
+import re
 
 # Configure Google Generative AI
-GENAI_API_KEY = "API KEY HERE GEMINI"
+GENAI_API_KEY = "API KEY HERE "
 genai.configure(api_key=GENAI_API_KEY)
 
 # Configure Flask app
 logging.basicConfig(level=logging.DEBUG)
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
+
+app.secret_key = 'your_secret_key_here'  # Make sure this is a strong, random key
 
 # Set up the Generative AI model configuration
 generation_config = {
@@ -59,45 +66,161 @@ else:
     tfidf_matrix = None
     print("No documents found in the knowledge base. Please add .txt files to the 'knowledge_base' directory.")
 
+# Add new configurations
+UPLOAD_FOLDER = 'uploads'
+USER_DATA_FOLDER = 'user_data'
+ALLOWED_EXTENSIONS = {'pdf'}
+
+for folder in [UPLOAD_FOLDER, USER_DATA_FOLDER]:
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def extract_text_from_pdf(file_path):
+    with open(file_path, 'rb') as file:
+        reader = PyPDF2.PdfReader(file)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+    return text
+
+def get_user_folder(user_id):
+    user_folder = os.path.join(USER_DATA_FOLDER, user_id)
+    if not os.path.exists(user_folder):
+        os.makedirs(user_folder)
+    return user_folder
+
+def save_user_data(user_id, data):
+    user_folder = get_user_folder(user_id)
+    with open(os.path.join(user_folder, 'data.json'), 'w') as f:
+        json.dump(data, f)
+
+def load_user_data(user_id):
+    user_folder = get_user_folder(user_id)
+    data_file = os.path.join(user_folder, 'data.json')
+    if os.path.exists(data_file):
+        with open(data_file, 'r') as f:
+            return json.load(f)
+    return {'documents': [], 'document_names': []}
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'})
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'})
+    if file and allowed_file(file.filename):
+        user_id = session.get('user_id')
+        if not user_id:
+            user_id = str(uuid.uuid4())
+            session['user_id'] = user_id
+        
+        filename = secure_filename(file.filename)
+        user_folder = get_user_folder(user_id)
+        file_path = os.path.join(user_folder, filename)
+        file.save(file_path)
+        
+        # Extract text from PDF and add to documents
+        text = extract_text_from_pdf(file_path)
+        
+        # Load existing user data or create new
+        user_data = load_user_data(user_id)
+        
+        user_data['documents'].append(text)
+        user_data['document_names'].append(filename)
+        
+        # Save updated user data
+        save_user_data(user_id, user_data)
+        
+        return jsonify({'message': 'File uploaded successfully'})
+    return jsonify({'error': 'File type not allowed'})
+
+@app.route('/get_files', methods=['GET'])
+def get_files():
+    user_id = session.get('user_id')
+    if user_id:
+        user_data = load_user_data(user_id)
+        return jsonify({'files': user_data['document_names']})
+    return jsonify({'files': []})
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     response = ""
     if request.method == "POST":
         user_query = request.form.get("query")
-        if user_query and tfidf_matrix is not None:
-            # Transform the user query into TF-IDF vector
-            query_vec = vectorizer.transform([user_query])
+        selected_file = request.form.get("selected_file")
+        
+        app.logger.info(f"Query: {user_query}, Selected File: {selected_file}")
+        
+        user_id = session.get('user_id')
+        if user_id:
+            user_data = load_user_data(user_id)
+            if user_data['documents']:
+                documents = user_data['documents']
+                document_names = user_data['document_names']
+                
+                app.logger.info(f"User documents: {document_names}")
+                
+                vectorizer = TfidfVectorizer(stop_words='english')
+                tfidf_matrix = vectorizer.fit_transform(documents)
+                
+                if selected_file and selected_file in document_names:
+                    doc_index = document_names.index(selected_file)
+                    query_vec = vectorizer.transform([user_query])
+                    doc_vec = tfidf_matrix[doc_index]
+                    similarities = cosine_similarity(query_vec, doc_vec).flatten()
+                    retrieved_content = documents[doc_index]
+                    app.logger.info(f"Using selected file: {selected_file}")
+                else:
+                    query_vec = vectorizer.transform([user_query])
+                    similarities = cosine_similarity(query_vec, tfidf_matrix).flatten()
+                    top_indices = similarities.argsort()[-TOP_N:][::-1]
+                    retrieved_docs = [documents[idx] for idx in top_indices]
+                    retrieved_content = "\n\n".join(retrieved_docs)
+                    app.logger.info("Using all documents")
 
-            # Compute cosine similarity between query and all documents
-            similarities = cosine_similarity(query_vec, tfidf_matrix).flatten()
+                prompt = f"Context:\n{retrieved_content}\n\nQuestion: {user_query}\nAnswer:"
 
-            # Get indices of top N similar documents
-            top_indices = similarities.argsort()[-TOP_N:][::-1]
-
-            # Retrieve the content of top N documents
-            retrieved_docs = [documents[idx] for idx in top_indices]
-            retrieved_content = "\n\n".join(retrieved_docs)
-
-            # Prepare the prompt for Gemini API with retrieved context
-            prompt = f"Context:\n{retrieved_content}\n\nQuestion: {user_query}\nAnswer:"
-
-            try:
-                # Generate response using the Generative AI library
-                api_response = model.generate_content(prompt)
-                response = format_response(api_response.text.strip())
-            except Exception as e:
-                response = f"An error occurred while generating the response: {e}"
-        elif tfidf_matrix is None:
-            response = "The knowledge base is empty. Please add .txt files to the 'knowledge_base' directory."
+                try:
+                    api_response = model.generate_content(prompt)
+                    response = format_response(api_response.text.strip())
+                except Exception as e:
+                    response = f"An error occurred while generating the response: {e}"
+                    app.logger.error(f"Error generating response: {e}")
+            else:
+                response = "No documents have been uploaded yet. Please upload a PDF file first."
         else:
-            response = "Please enter a valid query."
+            response = "Please upload a document first."
 
     return render_template("index.html", response=response)
 
 def format_response(response_text):
-    # Improve the formatting of the response
-    formatted_response = response_text.replace("* **", "\n- **")
+    # Split the response into paragraphs
+    paragraphs = response_text.split('\n\n')
+    formatted_paragraphs = []
+
+    for paragraph in paragraphs:
+        # Format bullet points
+        if paragraph.startswith('- ') or paragraph.startswith('* '):
+            lines = paragraph.split('\n')
+            formatted_lines = [f"• {line[2:]}" for line in lines]
+            formatted_paragraph = '\n'.join(formatted_lines)
+        else:
+            # Format bold text
+            formatted_paragraph = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', paragraph)
+        
+        formatted_paragraphs.append(formatted_paragraph)
+
+    # Join paragraphs with proper spacing
+    formatted_response = '<br><br>'.join(formatted_paragraphs)
+
+    # Add any additional formatting as needed
+    formatted_response = formatted_response.replace('**', '<strong>').replace('</strong>**', '</strong>')
+
     return formatted_response
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5002, debug=True)
