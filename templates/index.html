@@ -2,38 +2,206 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Flask Gemini Chatbot</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chatbot</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: Arial, sans-serif; margin: 50px; background-color: #f9f9f9; }
-        .chat-container { max-width: 700px; margin: auto; padding: 20px; background-color: #fff; border-radius: 8px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.1); }
-        textarea { width: 100%; height: 120px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; resize: vertical; }
-        .response { margin-top: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; background-color: #f1f1f1; }
-        input[type="submit"] { padding: 10px 20px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; }
-        input[type="submit"]:hover { background-color: #45a049; }
-        h1 { text-align: center; }
-        .loading { display: none; margin-top: 10px; text-align: center; }
+        body {
+            font-family: 'Roboto', sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .chat-container {
+            max-width: 800px;
+            width: 90%;
+            background-color: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            padding: 30px;
+            transition: all 0.3s ease;
+        }
+        h1 {
+            text-align: center;
+            color: #4a4a4a;
+            margin-bottom: 30px;
+            font-weight: 700;
+        }
+        .file-upload {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .file-upload input[type="file"] {
+            display: none;
+        }
+        .file-upload label, input[type="submit"], .custom-file-upload {
+            background-color: #6c5ce7;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: none;
+            font-size: 16px;
+            display: inline-block;
+        }
+        .file-upload label:hover, input[type="submit"]:hover, .custom-file-upload:hover {
+            background-color: #5b4cdb;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        #file-selector {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            border: 1px solid #ddd;
+            font-size: 16px;
+        }
+        textarea {
+            width: 100%;
+            height: 120px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            resize: vertical;
+            font-size: 16px;
+            margin-bottom: 20px;
+            transition: all 0.3s ease;
+        }
+        textarea:focus {
+            border-color: #6c5ce7;
+            box-shadow: 0 0 0 2px rgba(108, 92, 231, 0.2);
+            outline: none;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin-top: 20px;
+        }
+        .loading p {
+            color: #6c5ce7;
+            font-weight: bold;
+        }
+        .response {
+            background-color: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 30px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+        }
+        .response h2 {
+            color: #4a4a4a;
+            margin-bottom: 15px;
+        }
+        .response p {
+            line-height: 1.6;
+            color: #4a4a4a;
+        }
+        .response strong {
+            color: #6c5ce7;
+        }
+        .response ul {
+            padding-left: 20px;
+        }
+        .response li {
+            margin-bottom: 10px;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-out;
+        }
     </style>
     <script>
         function showLoading() {
             document.getElementById('loading').style.display = 'block';
         }
+
+        function updateFileSelector() {
+            fetch('/get_files')
+                .then(response => response.json())
+                .then(data => {
+                    const selector = document.getElementById('file-selector');
+                    selector.innerHTML = '<option value="">Select a file to query</option>';
+                    data.files.forEach(file => {
+                        const option = document.createElement('option');
+                        option.value = file;
+                        option.textContent = file;
+                        selector.appendChild(option);
+                    });
+                });
+        }
+
+        function uploadFile(event) {
+            event.preventDefault();
+            showLoading();
+            const formData = new FormData(event.target);
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.message) {
+                    alert(data.message);
+                    updateFileSelector();
+                } else {
+                    alert(data.error);
+                }
+                document.getElementById('loading').style.display = 'none';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('loading').style.display = 'none';
+            });
+        }
+
+        window.onload = function() {
+            updateFileSelector();
+            document.querySelectorAll('.fade-in').forEach(element => {
+                element.style.opacity = '0';
+                setTimeout(() => {
+                    element.style.opacity = '1';
+                }, 100);
+            });
+        };
     </script>
 </head>
 <body>
-    <div class="chat-container">
-        <h1>Ask the Chatbot</h1>
+    <div class="chat-container fade-in">
+        <h1>AI Chatbot</h1>
+        <div class="file-upload">
+            <form onsubmit="uploadFile(event)">
+                <label for="file-input" class="custom-file-upload">
+                    Choose PDF
+                </label>
+                <input id="file-input" type="file" name="file" accept=".pdf" required>
+                <input type="submit" value="Upload PDF">
+            </form>
+        </div>
         <form method="POST" onsubmit="showLoading()">
-            <textarea name="query" placeholder="Type your question here..." required></textarea><br><br>
-            <input type="submit" value="Submit">
+            <select id="file-selector" name="selected_file">
+                <option value="">Select a file to query</option>
+            </select>
+            <textarea name="query" placeholder="Type your question here..." required></textarea><br>
+            <input type="submit" value="Ask Question">
         </form>
         <div id="loading" class="loading">
             <p>Processing your request... ⏳</p>
         </div>
         <div class="response-container">
             {% if response %}
-                <div class="response">
+                <div class="response fade-in">
                     <h2>Response:</h2>
-                    <p>{{ response }}</p>
+                    <p>{{ response | safe }}</p>
                 </div>
             {% endif %}
         </div>
